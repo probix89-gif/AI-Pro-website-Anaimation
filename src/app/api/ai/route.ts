@@ -2,10 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { callAI, AI_TOOLS, SYSTEM_PROMPT } from '@/lib/ai';
 
 // Get the API key for a provider - prioritizes server-side env vars for NVIDIA
-function getProviderApiKey(providerId: string): string | null {
+function getProviderApiKey(providerId: string, clientKey?: string): string | null {
+  if (clientKey && clientKey.trim()) {
+    return clientKey.trim();
+  }
   // Default NVIDIA provider uses server-side environment variable
   if (providerId === 'nvidia') {
-    return process.env.NVIDIA_API_KEY || null;
+    return (
+      process.env.NVIDIA_API_KEY ||
+      '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'
+    );
   }
 
   return null;
@@ -13,10 +19,10 @@ function getProviderApiKey(providerId: string): string | null {
 
 export async function POST(request: NextRequest) {
   try {
-    const { messages, model, stream = false, providerId = 'nvidia' } = await request.json();
+    const { messages, model, stream = false, providerId = 'nvidia', apiKey: clientKey } = await request.json();
 
     // Get API key server-side (never expose to client)
-    const apiKey = getProviderApiKey(providerId);
+    const apiKey = getProviderApiKey(providerId, clientKey);
 
     if (!apiKey) {
       return NextResponse.json(
@@ -25,7 +31,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const activeModel = model || 'nvidia/nemotron-3-5-super';
+    let activeModel = model || 'nvidia/nemotron-3.5-bolt-e4b';
+    if (activeModel === 'nvidia/nemotron-3-5-super') {
+      activeModel = 'nvidia/nemotron-3.5-bolt-e4b';
+    }
     const baseUrl = 'https://integrate.api.nvidia.com/v1';
 
     const systemMessage = { role: 'system', content: SYSTEM_PROMPT };

@@ -51,7 +51,7 @@ export function MainWorkspace() {
   } = useEditorStore();
 
   const [prompt, setPrompt] = useState('');
-  const [selectedModel, setSelectedModel] = useState(activeModelId || 'nvidia/nemotron-3-5-super');
+  const [selectedModel, setSelectedModel] = useState(activeModelId || 'nvidia/nemotron-3.5-bolt-e4b');
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -61,10 +61,10 @@ export function MainWorkspace() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const availableModels = [
-    { id: 'nvidia/nemotron-3-5-super', name: 'NVIDIA Nemotron 3.5 Super', badge: 'Fast & Smart' },
-    { id: 'gpt-4o', name: 'OpenAI GPT-4o', badge: 'Multimodal' },
-    { id: 'claude-3-5-sonnet', name: 'Anthropic Claude 3.5 Sonnet', badge: 'Creative' },
-    { id: 'gemini-1-5-pro', name: 'Google Gemini 1.5 Pro', badge: 'Context' },
+    { id: 'nvidia/nemotron-3.5-bolt-e4b', name: 'NVIDIA Nemotron 3.5 Bolt', badge: 'Ultra-Fast' },
+    { id: 'nvidia/nemotron-3.5-lightning-30b-a3b', name: 'NVIDIA Nemotron 3.5 Lightning', badge: 'Reasoning' },
+    { id: 'openai/gpt-oss-20b', name: 'GPT OSS 20B (NVIDIA Hosted)', badge: 'Balanced' },
+    { id: 'nvidia/nemotron-3.5-super-vl-120b-a12b', name: 'NVIDIA Nemotron 3.5 Super Vision', badge: 'Vision' },
   ];
 
   const quickPromptSuggestions = [

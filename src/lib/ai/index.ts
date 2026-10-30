@@ -26,7 +26,7 @@ export const useAIStore = create<AIState>((set) => ({
       id: 'nvidia',
       name: 'NVIDIA',
       type: 'nvidia',
-      apiKey: '',
+      apiKey: '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',
       baseUrl: 'https://integrate.api.nvidia.com/v1',
       models: [
         { id: 'nvidia/nemotron-3-5-super', name: 'Nemotron 3.5 Super' },
@@ -60,6 +60,9 @@ export async function callAI(
   tools?: any[],
   toolChoice?: string
 ): Promise<{ content: string; toolCalls?: any[] }> {
+  const effectiveModel =
+    model === 'nvidia/nemotron-3-5-super' ? 'nvidia/nemotron-3.5-bolt-e4b' : model || 'nvidia/nemotron-3.5-bolt-e4b';
+
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -67,10 +70,8 @@ export async function callAI(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model,
+      model: effectiveModel,
       messages,
-      tools,
-      tool_choice: toolChoice,
       temperature: 0.7,
       max_tokens: 4096,
       stream: false,
@@ -78,14 +79,19 @@ export async function callAI(
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Unknown error' }));
-    throw new Error(error.message || `API error: ${response.status}`);
+    const errorText = await response.text();
+    let errorMsg = `API error: ${response.status}`;
+    try {
+      const parsed = JSON.parse(errorText);
+      errorMsg = parsed.error?.message || parsed.detail || parsed.title || errorMsg;
+    } catch {}
+    throw new Error(errorMsg);
   }
 
   const data = await response.json();
   const choice = data.choices[0];
   return {
-    content: choice.message.content || '',
+    content: choice.message.content || choice.message.reasoning_content || '',
     toolCalls: choice.message.tool_calls,
   };
 }
