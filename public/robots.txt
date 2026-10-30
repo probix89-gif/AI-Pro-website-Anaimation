@@ -1,0 +1,11 @@
+# Anitom AI - robots.txt
+User-agent: *
+Allow: /
+
+# Disallow private/admin routes
+Disallow: /api/
+Disallow: /_next/
+Disallow: /static/
+
+# Sitemap
+Sitemap: https://anitom-ai.vercel.app/sitemap.xml
