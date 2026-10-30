@@ -1,34 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  LayoutDashboard,
-  FileText,
-  History,
-  Image as ImageIcon,
-  Settings,
-  ChevronLeft,
-  ChevronRight,
-  ChevronUp,
-  ChevronDown,
-  Plus,
-  Menu,
-  X,
-  Bot,
-  Layers,
-  Timeline,
-  Palette,
-  Sparkles,
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useEditorStore } from '@/lib/store';
+import { TopBar } from './TopBar';
 import { LeftSidebar } from './LeftSidebar';
 import { RightSidebar } from './RightSidebar';
-import { BottomTimeline } from './BottomTimeline';
 import { CanvasViewport } from './CanvasViewport';
-import { TopBar } from './TopBar';
+import { BottomTimeline } from './BottomTimeline';
 import { ChatPanel } from '../chat/ChatPanel';
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Sparkles, X } from 'lucide-react';
 
 export function EditorLayout() {
   const {
@@ -42,194 +22,170 @@ export function EditorLayout() {
     activeRightTab,
     setActiveLeftTab,
     setActiveRightTab,
-    currentProject,
-    createProject,
   } = useEditorStore();
 
-  const [isMobile, setIsMobile] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [leftWidth, setLeftWidth] = useState(260);
+  const [rightWidth, setRightWidth] = useState(300);
+  const [timelineHeight, setTimelineHeight] = useState(190);
+
+  // Resizing states
+  const isResizingLeft = useRef(false);
+  const isResizingRight = useRef(false);
+  const isResizingTimeline = useRef(false);
+
+  const startResizingLeft = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizingLeft.current = true;
+  }, []);
+
+  const startResizingRight = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizingRight.current = true;
+  }, []);
+
+  const startResizingTimeline = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizingTimeline.current = true;
+  }, []);
 
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 1024);
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isResizingLeft.current) {
+        const newWidth = Math.max(64, Math.min(460, e.clientX));
+        setLeftWidth(newWidth);
+      } else if (isResizingRight.current) {
+        const newWidth = Math.max(240, Math.min(480, window.innerWidth - e.clientX));
+        setRightWidth(newWidth);
+      } else if (isResizingTimeline.current) {
+        const newHeight = Math.max(100, Math.min(380, window.innerHeight - e.clientY));
+        setTimelineHeight(newHeight);
+      }
+    };
+
+    const handleMouseUp = () => {
+      isResizingLeft.current = false;
+      isResizingRight.current = false;
+      isResizingTimeline.current = false;
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
   }, []);
 
   return (
-    <div className="h-screen w-full flex flex-col overflow-hidden bg-background">
-      {/* Top Bar */}
+    <div className="h-screen w-screen flex flex-col bg-[#09090d] text-[#f4f4f7] overflow-hidden select-none">
+      {/* Top Bar Header */}
       <TopBar
         onToggleLeft={toggleLeftSidebar}
         onToggleRight={toggleRightSidebar}
         onToggleBottom={toggleBottomTimeline}
+        onToggleChat={() => setChatOpen((prev) => !prev)}
         leftOpen={leftSidebarOpen}
         rightOpen={rightSidebarOpen}
         bottomOpen={bottomTimelineOpen}
-        isMobile={isMobile}
+        chatOpen={chatOpen}
       />
 
-      {/* Main Layout */}
-      <div className="flex-1 flex overflow-hidden relative">
-        {/* Left Sidebar */}
-        <AnimatePresence mode="wait">
-          {leftSidebarOpen && (
-            <motion.aside
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: isMobile ? 280 : 320, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.2, ease: 'easeInOut' }}
-              className={cn(
-                'fixed left-0 top-14 z-40 h-[calc(100vh-3.5rem)] bg-secondary border-r border-border flex flex-col',
-                isMobile ? 'w-[280px] shadow-xl' : 'w-[320px]'
-              )}
-            >
+      {/* Main Studio Viewport Grid */}
+      <div className="flex-1 flex overflow-hidden min-h-0 relative">
+        {/* LEFT TOOL RAIL: Resizable & Collapsible */}
+        {leftSidebarOpen && (
+          <div
+            className="relative flex shrink-0 border-r border-white/[0.07] bg-[#0c0c14] z-20 transition-[width] duration-75"
+            style={{ width: `${leftWidth}px` }}
+          >
+            <div className="w-full h-full overflow-hidden flex flex-col">
               <LeftSidebar
                 activeTab={activeLeftTab}
                 onTabChange={setActiveLeftTab}
-                onClose={isMobile ? toggleLeftSidebar : undefined}
               />
-            </motion.aside>
-          )}
-        </AnimatePresence>
-
-        {/* Main Workspace */}
-        <main
-          className={cn(
-            'flex-1 flex flex-col overflow-hidden transition-all duration-200',
-            leftSidebarOpen && !isMobile ? 'lg:ml-[320px]' : '',
-            rightSidebarOpen && !isMobile ? 'lg:mr-[320px]' : '',
-            bottomTimelineOpen ? 'lg:mb-[200px]' : ''
-          )}
-        >
-          <div className="flex-1 flex relative">
-            {/* Chat Panel (Left side of workspace) */}
-            <AnimatePresence mode="wait">
-              {activeLeftTab === 'chat' && leftSidebarOpen && (
-                <motion.div
-                  initial={{ width: 0, opacity: 0 }}
-                  animate={{ width: 400, opacity: 1 }}
-                  exit={{ width: 0, opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="hidden lg:block w-[400px] border-r border-border bg-secondary flex flex-col"
-                >
-                  <ChatPanel />
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Canvas Area */}
-            <div className="flex-1 flex flex-col min-w-0 relative">
-              <CanvasViewport />
             </div>
 
-            {/* Properties Panel (Right side of workspace) */}
-            <AnimatePresence mode="wait">
-              {activeRightTab !== 'layers' && rightSidebarOpen && (
-                <motion.div
-                  initial={{ width: 0, opacity: 0 }}
-                  animate={{ width: 320, opacity: 1 }}
-                  exit={{ width: 0, opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="hidden lg:block w-[320px] border-l border-border bg-secondary flex flex-col"
-                >
-                  <RightSidebar
-                    activeTab={activeRightTab}
-                    onTabChange={setActiveRightTab}
-                    onClose={isMobile ? toggleRightSidebar : undefined}
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {/* Drag Handle on Right Edge of Left Sidebar */}
+            <div
+              onMouseDown={startResizingLeft}
+              className="absolute -right-1 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-violet-500/30 transition-colors z-30"
+              title="Drag to resize sidebar"
+            />
           </div>
-        </main>
+        )}
 
-        {/* Right Sidebar (Layers) - Always on far right */}
-        <AnimatePresence mode="wait">
-          {(activeRightTab === 'layers' || !rightSidebarOpen) && (
-            <motion.aside
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: rightSidebarOpen ? 320 : 0, opacity: rightSidebarOpen ? 1 : 0 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.2, ease: 'easeInOut' }}
-              className={cn(
-                'fixed right-0 top-14 z-40 h-[calc(100vh-3.5rem)] bg-secondary border-l border-border flex flex-col',
-                rightSidebarOpen ? 'w-[320px] shadow-xl' : 'w-0'
-              )}
+        {/* CENTER STAGE: Canvas Viewport + Bottom Timeline */}
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0 min-h-0 relative z-10 bg-[#09090d]">
+          {/* Canvas Viewport */}
+          <div className="flex-1 relative overflow-hidden min-h-0">
+            <CanvasViewport />
+          </div>
+
+          {/* BOTTOM TIMELINE: Resizable & Collapsible */}
+          {bottomTimelineOpen && (
+            <div
+              className="relative shrink-0 border-t border-white/[0.08] bg-[#0c0c14] z-20 transition-[height] duration-75"
+              style={{ height: `${timelineHeight}px` }}
             >
+              {/* Drag Handle on Top Edge of Timeline */}
+              <div
+                onMouseDown={startResizingTimeline}
+                className="absolute left-0 right-0 -top-1 h-2.5 cursor-row-resize hover:bg-violet-500/30 transition-colors z-30"
+                title="Drag to resize timeline"
+              />
+
+              <div className="w-full h-full overflow-hidden flex flex-col">
+                <BottomTimeline />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT INSPECTOR: Properties, Layers, Animation, Style */}
+        {rightSidebarOpen && (
+          <div
+            className="relative flex shrink-0 border-l border-white/[0.07] bg-[#0c0c14] z-20 transition-[width] duration-75"
+            style={{ width: `${rightWidth}px` }}
+          >
+            {/* Drag Handle on Left Edge of Right Sidebar */}
+            <div
+              onMouseDown={startResizingRight}
+              className="absolute -left-1 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-violet-500/30 transition-colors z-30"
+              title="Drag to resize inspector"
+            />
+
+            <div className="w-full h-full overflow-hidden flex flex-col">
               <RightSidebar
                 activeTab={activeRightTab}
                 onTabChange={setActiveRightTab}
-                onClose={isMobile ? toggleRightSidebar : undefined}
+                onClose={toggleRightSidebar}
               />
-            </motion.aside>
-          )}
-        </AnimatePresence>
+            </div>
+          </div>
+        )}
 
-        {/* Mobile Overlay */}
-        {isMobile && (leftSidebarOpen || rightSidebarOpen) && (
-          <div
-            className="fixed inset-0 top-14 z-30 bg-black/50 backdrop-blur-sm lg:hidden"
-            onClick={() => {
-              if (leftSidebarOpen) toggleLeftSidebar();
-              if (rightSidebarOpen) toggleRightSidebar();
-            }}
-          />
+        {/* CONTEXTUAL AI CO-PILOT CHAT PANEL (Slide-over / Docked) */}
+        {chatOpen && (
+          <div className="absolute top-0 right-0 bottom-0 w-80 md:w-96 bg-[#10101a] border-l border-white/[0.1] shadow-2xl z-40 flex flex-col animate-slide-in-right">
+            <div className="h-10 px-4 border-b border-white/[0.08] flex items-center justify-between shrink-0 bg-violet-950/20">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-violet-400" />
+                <span className="text-xs font-semibold text-white">AI Studio Assistant</span>
+              </div>
+              <button
+                onClick={() => setChatOpen(false)}
+                className="p-1 rounded-md text-white/50 hover:text-white hover:bg-white/[0.08] transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <ChatPanel />
+            </div>
+          </div>
         )}
       </div>
-
-      {/* Bottom Timeline */}
-      <AnimatePresence mode="wait">
-        {bottomTimelineOpen && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 200, opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
-            className="fixed bottom-0 left-0 right-0 z-50 bg-secondary border-t border-border shadow-xl lg:static lg:shadow-none"
-          >
-            <BottomTimeline />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Floating Action Buttons for Mobile */}
-      {isMobile && (
-        <>
-          {!leftSidebarOpen && (
-            <motion.button
-              initial={{ scale: 0, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="fixed bottom-24 left-4 z-50 p-3 rounded-full bg-primary text-primary-foreground shadow-lg"
-              onClick={toggleLeftSidebar}
-              aria-label="Open sidebar"
-            >
-              <Menu className="w-5 h-5" />
-            </motion.button>
-          )}
-          {!rightSidebarOpen && (
-            <motion.button
-              initial={{ scale: 0, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="fixed bottom-24 right-4 z-50 p-3 rounded-full bg-primary text-primary-foreground shadow-lg"
-              onClick={toggleRightSidebar}
-              aria-label="Open properties"
-            >
-              <Layers className="w-5 h-5" />
-            </motion.button>
-          )}
-          {!bottomTimelineOpen && (
-            <motion.button
-              initial={{ scale: 0, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 p-3 rounded-full bg-primary text-primary-foreground shadow-lg"
-              onClick={toggleBottomTimeline}
-              aria-label="Open timeline"
-            >
-              <Timeline className="w-5 h-5" />
-            </motion.button>
-          )}
-        </>
-      )}
     </div>
   );
 }

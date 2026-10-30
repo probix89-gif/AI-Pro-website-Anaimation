@@ -1,9 +1,8 @@
 'use client';
 
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
-import type { CanvasElement, Vector2D } from '@/types';
-import { getElementBounds } from '@/lib/utils';
+import type { CanvasElement } from '@/types';
 import { ResizeHandle } from './ResizeHandle';
 import { RotationHandle } from './RotationHandle';
 
@@ -27,63 +26,96 @@ export function ElementRenderer({
   onDelete,
 }: ElementRendererProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const [bounds, setBounds] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [elementStart, setElementStart] = useState({ x: 0, y: 0 });
+  const [isEditingText, setIsEditingText] = useState(false);
+  const [textContent, setTextContent] = useState('');
+
+  const baseWidth = element.type === 'text' ? 240 : 160;
+  const baseHeight = element.type === 'text' ? 60 : 120;
 
   useEffect(() => {
-    const b = getElementBounds(element);
-    setBounds(b);
+    if (element.type === 'text' && (element as any).content !== undefined) {
+      setTextContent((element as any).content || '');
+    }
   }, [element]);
 
+  // Handle Dragging
   const handleMouseDown = (e: React.MouseEvent) => {
+    if (element.locked) return;
+    if (isEditingText) return;
     e.stopPropagation();
+
     onSelect(element.id, e.shiftKey);
+    setIsDragging(true);
+    setDragStart({ x: e.clientX, y: e.clientY });
+    setElementStart({ x: element.transform.position.x, y: element.transform.position.y });
   };
 
-  const handleMouseEnter = () => onHover(element.id);
-  const handleMouseLeave = () => onHover(null);
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const zoom = (ref.current?.closest('[data-zoom]')?.getAttribute('data-zoom')
+        ? parseFloat(ref.current.closest('[data-zoom]')!.getAttribute('data-zoom')!)
+        : 1) || 1;
+
+      const dx = (e.clientX - dragStart.x) / zoom;
+      const dy = (e.clientY - dragStart.y) / zoom;
+
+      onUpdate(element.id, {
+        transform: {
+          ...element.transform,
+          position: {
+            x: Math.round(elementStart.x + dx),
+            y: Math.round(elementStart.y + dy),
+          },
+        },
+      });
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, dragStart, elementStart, element.id, element.transform, onUpdate]);
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (element.type === 'text') {
-      // Enter text edit mode
+    if (element.type === 'text' && !element.locked) {
+      setIsEditingText(true);
     }
   };
 
-  const transformStyle = {
-    transform: `
-      translate(${element.transform.position.x}px, ${element.transform.position.y}px)
-      rotate(${element.transform.rotation}deg)
-      scale(${element.transform.scale.x}, ${element.transform.scale.y})
-    `,
-    transformOrigin: 'center center',
-    opacity: element.transform.opacity,
-    pointerEvents: element.visible ? 'auto' : 'none',
-  } as React.CSSProperties;
-
-  const commonStyle = {
-    position: 'absolute' as const,
-    left: bounds.x,
-    top: bounds.y,
-    width: bounds.width,
-    height: bounds.height,
-    boxSizing: 'border-box' as const,
-    userSelect: 'none' as const,
+  const handleTextBlur = () => {
+    setIsEditingText(false);
+    onUpdate(element.id, { content: textContent } as any);
   };
 
-  // Render based on element type
-  const renderElement = () => {
+  const renderContent = () => {
     const style = element.style || {};
 
     switch (element.type) {
       case 'rectangle': {
-        const cornerRadius = (element as any).cornerRadius || 0;
+        const cornerRadius = (element as any).cornerRadius || style.borderRadius || 12;
         return (
           <div
+            className="w-full h-full transition-colors"
             style={{
-              ...commonStyle,
-              backgroundColor: style.fill || 'transparent',
-              border: style.stroke ? `${style.strokeWidth || 1}px solid ${style.stroke}` : 'none',
-              borderRadius: cornerRadius,
+              backgroundColor: style.fill || '#7c3aed',
+              border: style.stroke ? `${style.strokeWidth || 1.5}px solid ${style.stroke}` : 'none',
+              borderRadius: `${cornerRadius}px`,
+              boxShadow: style.shadow
+                ? `${style.shadow.offsetX}px ${style.shadow.offsetY}px ${style.shadow.blur}px ${style.shadow.color}`
+                : undefined,
             }}
           />
         );
@@ -92,11 +124,14 @@ export function ElementRenderer({
       case 'ellipse': {
         return (
           <div
+            className="w-full h-full"
             style={{
-              ...commonStyle,
-              backgroundColor: style.fill || 'transparent',
-              border: style.stroke ? `${style.strokeWidth || 1}px solid ${style.stroke}` : 'none',
+              backgroundColor: style.fill || '#6366f1',
+              border: style.stroke ? `${style.strokeWidth || 1.5}px solid ${style.stroke}` : 'none',
               borderRadius: '50%',
+              boxShadow: style.shadow
+                ? `${style.shadow.offsetX}px ${style.shadow.offsetY}px ${style.shadow.blur}px ${style.shadow.color}`
+                : undefined,
             }}
           />
         );
@@ -104,27 +139,43 @@ export function ElementRenderer({
 
       case 'text': {
         const textEl = element as any;
+        if (isEditingText) {
+          return (
+            <textarea
+              value={textContent}
+              onChange={(e) => setTextContent(e.target.value)}
+              onBlur={handleTextBlur}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') handleTextBlur();
+              }}
+              autoFocus
+              className="w-full h-full bg-transparent resize-none outline-none border border-violet-400 p-2 rounded"
+              style={{
+                color: style.color || '#ffffff',
+                fontSize: `${textEl.fontSize || 24}px`,
+                fontFamily: textEl.fontFamily || 'Inter',
+                fontWeight: textEl.fontWeight || '600',
+                textAlign: textEl.textAlign || 'left',
+                lineHeight: textEl.lineHeight || 1.3,
+              }}
+            />
+          );
+        }
+
         return (
           <div
+            className="w-full h-full p-2 flex flex-col justify-center whitespace-pre-wrap select-none overflow-hidden"
             style={{
-              ...commonStyle,
               color: style.color || '#ffffff',
-              fontSize: textEl.fontSize || style.fontSize || 16,
-              fontFamily: textEl.fontFamily || style.fontFamily || 'Inter',
-              fontWeight: textEl.fontWeight || style.fontWeight || '400',
-              lineHeight: textEl.lineHeight || style.lineHeight || 1.5,
-              letterSpacing: textEl.letterSpacing || style.letterSpacing || 0,
-              textAlign: textEl.textAlign || style.textAlign || 'left',
-              display: 'flex',
-              alignItems: textEl.verticalAlign === 'top' ? 'flex-start' : textEl.verticalAlign === 'bottom' ? 'flex-end' : 'center',
-              justifyContent: textEl.textAlign === 'left' ? 'flex-start' : textEl.textAlign === 'right' ? 'flex-end' : 'center',
-              padding: 4,
-              overflow: 'hidden',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
+              fontSize: `${textEl.fontSize || 24}px`,
+              fontFamily: textEl.fontFamily || 'Inter',
+              fontWeight: textEl.fontWeight || '600',
+              textAlign: textEl.textAlign || 'left',
+              lineHeight: textEl.lineHeight || 1.3,
+              letterSpacing: `${textEl.letterSpacing || 0}px`,
             }}
           >
-            {textEl.content || 'Text'}
+            {textEl.content || 'Double-click to edit text'}
           </div>
         );
       }
@@ -132,148 +183,69 @@ export function ElementRenderer({
       case 'image': {
         const imgEl = element as any;
         return (
-          <div style={{ ...commonStyle, overflow: 'hidden' }}>
-            {imgEl.src && (
+          <div
+            className="w-full h-full overflow-hidden"
+            style={{ borderRadius: `${style.borderRadius || 12}px` }}
+          >
+            {imgEl.src ? (
               <img
                 src={imgEl.src}
-                alt={imgEl.name}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: imgEl.fit || 'contain',
-                  objectPosition: 'center',
-                }}
+                alt={imgEl.name || 'Canvas Image'}
+                className="w-full h-full"
+                style={{ objectFit: imgEl.fit || 'contain' }}
+                draggable={false}
               />
+            ) : (
+              <div className="w-full h-full bg-white/5 flex items-center justify-center text-white/30 text-xs">
+                No Image
+              </div>
             )}
           </div>
         );
       }
 
-      case 'frame': {
-        const frameEl = element as any;
-        return (
-          <div
-            style={{
-              ...commonStyle,
-              backgroundColor: frameEl.backgroundColor || 'transparent',
-              border: '1px dashed var(--border)',
-              overflow: frameEl.clipsContent ? 'hidden' : 'visible',
-            }}
-          >
-            {frameEl.children?.map((childId: string) => (
-              <div key={childId} className="frame-child" />
-            ))}
-          </div>
-        );
-      }
-
-      case 'group': {
-        return (
-          <div style={{ ...commonStyle, border: '1px dashed var(--primary)' }}>
-            <div className="absolute top-1 left-1 px-1 py-0.5 text-xs bg-primary/80 text-primary-foreground rounded">
-              Group
-            </div>
-          </div>
-        );
-      }
-
-      case 'line':
-      case 'arrow': {
-        const lineEl = element as any;
-        const startX = lineEl.startPoint?.x || 0;
-        const startY = lineEl.startPoint?.y || 0;
-        const endX = lineEl.endPoint?.x || bounds.width;
-        const endY = lineEl.endPoint?.y || bounds.height;
-
-        return (
-          <svg style={{ ...commonStyle, overflow: 'visible' }} viewBox="0 0 100 100" preserveAspectRatio="none">
-            <defs>
-              {lineEl.endArrow && (
-                <marker
-                  id={`arrowhead-${element.id}`}
-                  markerWidth="10"
-                  markerHeight="10"
-                  refX="9"
-                  refY="3"
-                  orient="auto"
-                  markerUnits="strokeWidth"
-                >
-                  <path d="M0,0 L0,6 L9,3 z" fill={style.stroke || '#ffffff'} />
-                </marker>
-              )}
-              {lineEl.startArrow && (
-                <marker
-                  id={`arrowhead-start-${element.id}`}
-                  markerWidth="10"
-                  markerHeight="10"
-                  refX="1"
-                  refY="3"
-                  orient="auto"
-                  markerUnits="strokeWidth"
-                >
-                  <path d="M9,0 L9,6 L0,3 z" fill={style.stroke || '#ffffff'} />
-                </marker>
-              )}
-            </defs>
-            <line
-              x1={startX}
-              y1={startY}
-              x2={endX}
-              y2={endY}
-              stroke={style.stroke || '#ffffff'}
-              strokeWidth={style.strokeWidth || 2}
-              strokeDasharray={style.strokeDasharray || 'none'}
-              markerEnd={lineEl.endArrow ? `url(#arrowhead-${element.id})` : undefined}
-              markerStart={lineEl.startArrow ? `url(#arrowhead-start-${element.id})` : undefined}
-            />
-          </svg>
-        );
-      }
-
       case 'chart': {
-        return (
-          <div style={{ ...commonStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-foreground)' }}>
-            <span>📊 Chart: {element.chartType}</span>
-          </div>
-        );
-      }
+        const chartEl = element as any;
+        const labels = chartEl.data?.labels || ['Q1', 'Q2', 'Q3', 'Q4'];
+        const values = chartEl.data?.datasets?.[0]?.data || [40, 75, 60, 95];
+        const colors = chartEl.data?.datasets?.[0]?.backgroundColor || [
+          '#6366f1',
+          '#8b5cf6',
+          '#a855f7',
+          '#d946ef',
+        ];
+        const maxVal = Math.max(...values, 100);
 
-      case 'diagram': {
         return (
-          <div style={{ ...commonStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-foreground)' }}>
-            <span>📐 Diagram: {element.diagramType}</span>
-          </div>
-        );
-      }
-
-      case 'mindmap': {
-        return (
-          <div style={{ ...commonStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-foreground)' }}>
-            <span>🧠 Mindmap</span>
-          </div>
-        );
-      }
-
-      case 'flowchart': {
-        return (
-          <div style={{ ...commonStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-foreground)' }}>
-            <span>⟳ Flowchart</span>
-          </div>
-        );
-      }
-
-      case 'animation': {
-        return (
-          <div style={{ ...commonStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-foreground)', border: '2px dashed var(--primary)' }}>
-            <span>✨ Animation</span>
+          <div className="w-full h-full bg-[#13131f] border border-white/[0.08] rounded-xl p-3 flex flex-col justify-between">
+            <div className="text-[11px] font-semibold text-white/70 tracking-wide uppercase">
+              {chartEl.name || 'Bar Chart'}
+            </div>
+            <div className="flex-1 flex items-end gap-2 pt-2 pb-1">
+              {values.map((val: number, i: number) => {
+                const heightPercent = Math.max(15, (val / maxVal) * 100);
+                const col = Array.isArray(colors) ? colors[i % colors.length] : colors;
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
+                    <div
+                      className="w-full rounded-t-md transition-all duration-300"
+                      style={{ height: `${heightPercent}%`, backgroundColor: col }}
+                    />
+                    <span className="text-[9px] text-white/40 font-mono">
+                      {labels[i] || `P${i}`}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         );
       }
 
       default:
         return (
-          <div style={{ ...commonStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-foreground)' }}>
-            <span>Unknown Element</span>
+          <div className="w-full h-full bg-violet-600/30 border border-violet-400 rounded-lg p-2 text-xs text-white/80 flex items-center justify-center">
+            {element.name}
           </div>
         );
     }
@@ -284,61 +256,110 @@ export function ElementRenderer({
       ref={ref}
       data-element={element.id}
       data-type={element.type}
-      style={{
-        ...transformStyle,
-        zIndex: element.zIndex,
-        cursor: element.locked ? 'not-allowed' : 'move',
-      }}
-      className={cn(
-        'transition-all duration-100',
-        isSelected && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
-        isHovered && !isSelected && 'ring-1 ring-primary/50 ring-offset-1 ring-offset-background',
-        element.locked && 'opacity-70',
-        !element.visible && 'opacity-30'
-      )}
       onMouseDown={handleMouseDown}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
       onDoubleClick={handleDoubleClick}
+      onMouseEnter={() => onHover(element.id)}
+      onMouseLeave={() => onHover(null)}
+      className={cn(
+        'absolute group select-none transition-shadow',
+        isSelected ? 'ring-2 ring-violet-500 ring-offset-2 ring-offset-transparent' : '',
+        isHovered && !isSelected ? 'ring-1 ring-violet-400/50' : '',
+        element.locked ? 'cursor-not-allowed opacity-60' : 'cursor-move'
+      )}
+      style={{
+        left: `${element.transform.position.x}px`,
+        top: `${element.transform.position.y}px`,
+        width: `${baseWidth * element.transform.scale.x}px`,
+        height: `${baseHeight * element.transform.scale.y}px`,
+        transform: `translate(-50%, -50%) rotate(${element.transform.rotation}deg)`,
+        transformOrigin: 'center center',
+        opacity: element.transform.opacity ?? 1,
+        zIndex: element.zIndex,
+      }}
     >
-      {renderElement()}
+      {renderContent()}
 
-      {/* Selection Handles */}
+      {/* Selection Handles (Resize + Rotate) */}
       {isSelected && !element.locked && (
         <>
           <ResizeHandle
             element={element}
             position="top-left"
-            onResize={(delta) => onUpdate(element.id, { transform: { ...element.transform, position: { x: element.transform.position.x + delta.x / 2, y: element.transform.position.y + delta.y / 2 }, scale: { x: element.transform.scale.x - delta.x / bounds.width, y: element.transform.scale.y - delta.y / bounds.height } } })}
+            onResize={(delta) => {
+              onUpdate(element.id, {
+                transform: {
+                  ...element.transform,
+                  scale: {
+                    x: Math.max(0.3, element.transform.scale.x - delta.x / baseWidth),
+                    y: Math.max(0.3, element.transform.scale.y - delta.y / baseHeight),
+                  },
+                },
+              });
+            }}
           />
           <ResizeHandle
             element={element}
             position="top-right"
-            onResize={(delta) => onUpdate(element.id, { transform: { ...element.transform, position: { x: element.transform.position.x - delta.x / 2, y: element.transform.position.y + delta.y / 2 }, scale: { x: element.transform.scale.x + delta.x / bounds.width, y: element.transform.scale.y - delta.y / bounds.height } } })}
+            onResize={(delta) => {
+              onUpdate(element.id, {
+                transform: {
+                  ...element.transform,
+                  scale: {
+                    x: Math.max(0.3, element.transform.scale.x + delta.x / baseWidth),
+                    y: Math.max(0.3, element.transform.scale.y - delta.y / baseHeight),
+                  },
+                },
+              });
+            }}
           />
           <ResizeHandle
             element={element}
             position="bottom-left"
-            onResize={(delta) => onUpdate(element.id, { transform: { ...element.transform, position: { x: element.transform.position.x + delta.x / 2, y: element.transform.position.y - delta.y / 2 }, scale: { x: element.transform.scale.x - delta.x / bounds.width, y: element.transform.scale.y + delta.y / bounds.height } } })}
+            onResize={(delta) => {
+              onUpdate(element.id, {
+                transform: {
+                  ...element.transform,
+                  scale: {
+                    x: Math.max(0.3, element.transform.scale.x - delta.x / baseWidth),
+                    y: Math.max(0.3, element.transform.scale.y + delta.y / baseHeight),
+                  },
+                },
+              });
+            }}
           />
           <ResizeHandle
             element={element}
             position="bottom-right"
-            onResize={(delta) => onUpdate(element.id, { transform: { ...element.transform, position: { x: element.transform.position.x - delta.x / 2, y: element.transform.position.y - delta.y / 2 }, scale: { x: element.transform.scale.x + delta.x / bounds.width, y: element.transform.scale.y + delta.y / bounds.height } } })}
+            onResize={(delta) => {
+              onUpdate(element.id, {
+                transform: {
+                  ...element.transform,
+                  scale: {
+                    x: Math.max(0.3, element.transform.scale.x + delta.x / baseWidth),
+                    y: Math.max(0.3, element.transform.scale.y + delta.y / baseHeight),
+                  },
+                },
+              });
+            }}
           />
 
           <RotationHandle
             element={element}
-            onRotate={(rotation) => onUpdate(element.id, { transform: { ...element.transform, rotation } })}
+            onRotate={(rotation) => {
+              onUpdate(element.id, {
+                transform: {
+                  ...element.transform,
+                  rotation: Math.round(rotation),
+                },
+              });
+            }}
           />
-        </>
-      )}
 
-      {/* Element Name Label */}
-      {isSelected && (
-        <div className="absolute -top-6 left-0 px-1.5 py-0.5 text-xs bg-primary text-primary-foreground rounded whitespace-nowrap">
-          {element.name}
-        </div>
+          {/* Name Badge */}
+          <div className="absolute -top-6 left-0 px-1.5 py-0.5 rounded bg-violet-600 text-white text-[10px] font-semibold whitespace-nowrap pointer-events-none shadow-md">
+            {element.name}
+          </div>
+        </>
       )}
     </div>
   );

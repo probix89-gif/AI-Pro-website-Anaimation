@@ -1,7 +1,7 @@
 'use client';
 
-import { useRef, useEffect, useState } from 'react';
-import { cn } from '@/lib/utils';
+import { useRef, useEffect, useState, useCallback } from 'react';
+import { cn, formatTime } from '@/lib/utils';
 import {
   Play,
   Pause,
@@ -9,15 +9,13 @@ import {
   SkipForward,
   RotateCcw,
   Zap,
+  Plus,
+  Clock,
   Layers,
-  Maximize2,
-  Minimize2,
-  ChevronUp,
-  ChevronDown,
+  Diamond,
 } from 'lucide-react';
 import { useEditorStore } from '@/lib/store';
-import { formatTime } from '@/lib/utils';
-import type { AnimationTrack } from '@/types';
+import type { AnimationTrack, AnimationKeyframe } from '@/types';
 
 export function BottomTimeline() {
   const {
@@ -28,33 +26,68 @@ export function BottomTimeline() {
     setPlaying,
     setTimelineZoom,
     setTimelineLoop,
-    animations,
+    setTimelineDuration,
+    selectElement,
+    addAnimationTrack,
+    updateAnimationTrack,
   } = useEditorStore();
 
   const timelineRef = useRef<HTMLDivElement>(null);
   const rulerRef = useRef<HTMLDivElement>(null);
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
-  const [showKeyframes, setShowKeyframes] = useState(false);
+  const animFrameRef = useRef<number | null>(null);
+  const lastTimeRef = useRef<number | null>(null);
 
-  const pixelsPerSecond = 100 * timeline.zoom;
-  const totalWidth = timeline.duration * pixelsPerSecond;
+  // Smooth playback loop
+  useEffect(() => {
+    if (timeline.playing) {
+      lastTimeRef.current = performance.now();
+      const tick = (now: number) => {
+        if (!lastTimeRef.current) lastTimeRef.current = now;
+        const deltaSec = (now - lastTimeRef.current) / 1000;
+        lastTimeRef.current = now;
+
+        const nextTime = timeline.currentTime + deltaSec;
+        if (nextTime >= timeline.duration) {
+          if (timeline.loop) {
+            setCurrentTime(0);
+          } else {
+            setCurrentTime(timeline.duration);
+            setPlaying(false);
+            return;
+          }
+        } else {
+          setCurrentTime(nextTime);
+        }
+
+        animFrameRef.current = requestAnimationFrame(tick);
+      };
+
+      animFrameRef.current = requestAnimationFrame(tick);
+    } else {
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      lastTimeRef.current = null;
+    }
+
+    return () => {
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    };
+  }, [timeline.playing, timeline.currentTime, timeline.duration, timeline.loop, setCurrentTime, setPlaying]);
+
+  const pixelsPerSecond = 80 * timeline.zoom;
+  const totalWidth = Math.max(800, timeline.duration * pixelsPerSecond);
   const playheadPosition = timeline.currentTime * pixelsPerSecond;
 
-  const handleRulerClick = (e: React.MouseEvent) => {
-    if (!rulerRef.current) return;
-    const rect = rulerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const time = x / pixelsPerSecond;
-    setCurrentTime(Math.max(0, Math.min(timeline.duration, time)));
-  };
-
-  const handlePlayheadDrag = (e: React.MouseEvent) => {
-    if (!isDraggingPlayhead || !rulerRef.current) return;
-    const rect = rulerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const time = x / pixelsPerSecond;
-    setCurrentTime(Math.max(0, Math.min(timeline.duration, time)));
-  };
+  const handleRulerClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!rulerRef.current) return;
+      const rect = rulerRef.current.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const newTime = Math.max(0, Math.min(timeline.duration, clickX / pixelsPerSecond));
+      setCurrentTime(newTime);
+    },
+    [timeline.duration, pixelsPerSecond, setCurrentTime]
+  );
 
   const handlePlayheadMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -62,8 +95,17 @@ export function BottomTimeline() {
   };
 
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => handlePlayheadDrag(e as any);
-    const handleMouseUp = () => setIsDraggingPlayhead(false);
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingPlayhead || !rulerRef.current) return;
+      const rect = rulerRef.current.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const newTime = Math.max(0, Math.min(timeline.duration, clickX / pixelsPerSecond));
+      setCurrentTime(newTime);
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingPlayhead(false);
+    };
 
     if (isDraggingPlayhead) {
       window.addEventListener('mousemove', handleMouseMove);
@@ -74,267 +116,211 @@ export function BottomTimeline() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDraggingPlayhead, pixelsPerSecond]);
+  }, [isDraggingPlayhead, timeline.duration, pixelsPerSecond, setCurrentTime]);
 
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.target instanceof HTMLInputElement) return;
-
-    switch (e.key) {
-      case ' ':
-        e.preventDefault();
-        setPlaying(!timeline.playing);
-        break;
-      case 'ArrowLeft':
-        e.preventDefault();
-        setCurrentTime(Math.max(0, timeline.currentTime - 1 / timeline.fps));
-        break;
-      case 'ArrowRight':
-        e.preventDefault();
-        setCurrentTime(Math.min(timeline.duration, timeline.currentTime + 1 / timeline.fps));
-        break;
-      case 'Home':
-        e.preventDefault();
-        setCurrentTime(0);
-        break;
-      case 'End':
-        e.preventDefault();
-        setCurrentTime(timeline.duration);
-        break;
-    }
-  };
-
-  useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [timeline.playing, timeline.currentTime, timeline.fps, timeline.duration, setCurrentTime, setPlaying]);
-
-  // Get tracks for selected element
-  const selectedElement = currentProject?.elements.find((el) => el.id === editor.selectedElements[0]);
-  const elementTracks = selectedElement ? animations.filter((t) => t.elementId === selectedElement.id) : [];
+  const elements = currentProject?.elements || [];
 
   return (
-    <div className="flex flex-col h-[200px] bg-secondary border-t border-border">
-      {/* Timeline Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border">
-        <div className="flex items-center gap-4">
-          <h3 className="font-medium text-sm">Timeline</h3>
-          <div className="flex items-center gap-1 border-l border-border pl-4">
-            <button
-              onClick={() => setCurrentTime(0)}
-              className="p-1.5 rounded hover:bg-accent transition-colors"
-              title="Go to Start (Home)"
-            >
-              <SkipBack className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setPlaying(!timeline.playing)}
-              className="p-2 rounded hover:bg-accent transition-colors bg-primary/10"
-              title={timeline.playing ? 'Pause (Space)' : 'Play (Space)'}
-            >
-              {timeline.playing ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
-            </button>
-            <button
-              onClick={() => setCurrentTime(timeline.duration)}
-              className="p-1.5 rounded hover:bg-accent transition-colors"
-              title="Go to End (End)"
-            >
-              <SkipForward className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
+    <div className="h-full w-full flex flex-col bg-[#0c0c14] select-none text-white overflow-hidden">
+      {/* TIMELINE TOP BAR: Controls & Scrubbing Information */}
+      <div className="h-9 px-3 border-b border-white/[0.08] flex items-center justify-between shrink-0 bg-[#0e0e16]">
+        {/* Playback Buttons */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setCurrentTime(0)}
+            className="p-1 rounded text-white/50 hover:text-white hover:bg-white/[0.08] transition-colors"
+            title="Go to Start (Home)"
+          >
+            <SkipBack className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setPlaying(!timeline.playing)}
+            className={cn(
+              'px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all',
+              timeline.playing
+                ? 'bg-violet-600 text-white shadow-sm'
+                : 'bg-white/[0.06] text-white/80 hover:text-white hover:bg-white/[0.1]'
+            )}
+            title="Play/Pause (Space)"
+          >
+            {timeline.playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+            <span>{timeline.playing ? 'Pause' : 'Play'}</span>
+          </button>
+          <button
+            onClick={() => setCurrentTime(timeline.duration)}
+            className="p-1 rounded text-white/50 hover:text-white hover:bg-white/[0.08] transition-colors"
+            title="Go to End (End)"
+          >
+            <SkipForward className="w-3.5 h-3.5" />
+          </button>
 
-        <div className="flex items-center gap-3">
-          {/* Time Display */}
-          <div className="flex items-center gap-2 px-3 py-1 bg-input rounded-lg font-mono text-sm">
-            <span className="text-foreground">{formatTime(timeline.currentTime, timeline.fps)}</span>
-            <span className="text-muted-foreground">/</span>
-            <span className="text-muted-foreground">{formatTime(timeline.duration, timeline.fps)}</span>
-          </div>
-
-          {/* Loop Toggle */}
+          {/* Loop playback toggle */}
           <button
             onClick={() => setTimelineLoop(!timeline.loop)}
             className={cn(
-              'p-1.5 rounded transition-colors',
-              timeline.loop ? 'bg-primary/10 text-primary' : 'hover:bg-accent'
+              'p-1 ml-1 rounded transition-colors',
+              timeline.loop ? 'bg-violet-500/20 text-violet-300' : 'text-white/40 hover:text-white'
             )}
-            title="Loop Playback"
+            title="Toggle Loop"
           >
-            <RotateCcw className="w-4 h-4" />
+            <RotateCcw className="w-3.5 h-3.5" />
           </button>
+        </div>
 
-          {/* Zoom */}
-          <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-muted-foreground" />
+        {/* Center Time Readout */}
+        <div className="flex items-center gap-1.5 font-mono text-xs px-2.5 py-0.5 rounded bg-black/40 border border-white/[0.06]">
+          <span className="text-violet-300">{formatTime(timeline.currentTime, timeline.fps)}</span>
+          <span className="text-white/20">/</span>
+          <span className="text-white/50">{formatTime(timeline.duration, timeline.fps)}</span>
+        </div>
+
+        {/* Right Duration & Zoom Settings */}
+        <div className="flex items-center gap-3 text-xs">
+          <div className="flex items-center gap-1.5 text-white/50">
+            <span>Duration:</span>
             <input
-              type="range"
-              min="0.1"
-              max="5"
-              step="0.1"
-              value={timeline.zoom}
-              onChange={(e) => setTimelineZoom(parseFloat(e.target.value))}
-              className="w-32 h-2 appearance-none bg-muted rounded-lg"
+              type="number"
+              min={1}
+              max={120}
+              value={timeline.duration}
+              onChange={(e) => setTimelineDuration(Math.max(1, parseInt(e.target.value) || 1))}
+              className="w-12 px-1.5 py-0.5 bg-black/40 border border-white/[0.08] rounded text-white text-center font-mono text-xs outline-none"
             />
-            <span className="text-xs text-muted-foreground w-12 text-right">
-              {Math.round(timeline.zoom * 100)}%
-            </span>
+            <span>s</span>
           </div>
 
-          {/* Collapse/Expand */}
-          <button className="p-1.5 rounded hover:bg-accent transition-colors">
-            <ChevronUp className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1.5 text-white/40">
+            <Zap className="w-3 h-3 text-violet-400" />
+            <input
+              type="range"
+              min={0.5}
+              max={3}
+              step={0.1}
+              value={timeline.zoom}
+              onChange={(e) => setTimelineZoom(parseFloat(e.target.value))}
+              className="w-16 h-1.5 appearance-none bg-white/[0.1] rounded-lg accent-violet-500"
+              title="Timeline Scale"
+            />
+          </div>
         </div>
       </div>
 
-      {/* Timeline Ruler & Tracks */}
-      <div className="flex-1 flex overflow-hidden relative">
-        {/* Layer Names */}
-        <div className="w-48 border-r border-border bg-secondary/50 flex-shrink-0 overflow-y-auto">
-          <div className="px-2 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wider border-b border-border">
-            Layers
+      {/* TRACKS AREA: Left layer labels & Right scrollable timeline ruler */}
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        {/* Layer names column */}
+        <div className="w-48 bg-[#0a0a12] border-r border-white/[0.08] overflow-y-auto shrink-0 flex flex-col">
+          <div className="h-6 px-3 border-b border-white/[0.06] flex items-center bg-[#0d0d16] text-[10px] font-semibold text-white/40 uppercase tracking-wider">
+            <span>Layer Tracks ({elements.length})</span>
           </div>
-          <div className="p-2 space-y-1">
-            {elementTracks.length === 0 ? (
-              <div className="text-center text-muted-foreground text-xs py-8">
-                No animation tracks for selected element
+          <div className="divide-y divide-white/[0.03]">
+            {elements.length === 0 ? (
+              <div className="p-3 text-[11px] text-white/30 text-center">
+                Canvas has no elements
               </div>
             ) : (
-              elementTracks.map((track) => (
-                <div
-                  key={track.id}
-                  className="px-2 py-1.5 text-xs rounded bg-accent/50 border border-border flex items-center justify-between"
-                >
-                  <span className="truncate">{track.property}</span>
-                  <span className="text-muted-foreground">{track.keyframes.length} keys</span>
-                </div>
-              ))
+              elements.map((el) => {
+                const isSelected = editor.selectedElements.includes(el.id);
+                return (
+                  <div
+                    key={el.id}
+                    onClick={() => selectElement(el.id)}
+                    className={cn(
+                      'h-8 px-3 flex items-center justify-between text-xs cursor-pointer transition-colors',
+                      isSelected
+                        ? 'bg-violet-600/20 text-violet-200 border-l-2 border-violet-500'
+                        : 'text-white/60 hover:text-white hover:bg-white/[0.02]'
+                    )}
+                  >
+                    <span className="truncate font-medium">{el.name}</span>
+                    <span className="text-[10px] font-mono opacity-40">{el.type}</span>
+                  </div>
+                );
+              })
             )}
-            <button className="w-full px-2 py-1.5 text-xs rounded border border-dashed border-border hover:border-primary/50 transition-colors flex items-center justify-center gap-1">
-              <Zap className="w-3.5 h-3.5" />
-              Add Track
-            </button>
           </div>
         </div>
 
-        {/* Timeline Area */}
-        <div className="flex-1 relative overflow-x-auto" ref={timelineRef}>
-          {/* Ruler */}
+        {/* Timeline Tracks & Ruler */}
+        <div
+          ref={timelineRef}
+          className="flex-1 overflow-x-auto overflow-y-auto relative bg-[#09090e]"
+        >
+          {/* Time Ruler */}
           <div
             ref={rulerRef}
-            className="absolute top-0 left-0 right-0 h-8 bg-secondary/50 border-b border-border z-10 flex items-end px-48"
             onClick={handleRulerClick}
-            style={{ width: totalWidth + 200 }}
+            className="h-6 border-b border-white/[0.08] bg-[#0c0c16] sticky top-0 z-20 cursor-pointer relative"
+            style={{ width: `${totalWidth}px` }}
           >
-            {Array.from({ length: Math.ceil(timeline.duration) + 1 }).map((_, i) => (
+            {Array.from({ length: Math.ceil(timeline.duration) + 1 }).map((_, sec) => (
               <div
-                key={i}
-                className="absolute bottom-0 w-px bg-border"
-                style={{
-                  left: i * pixelsPerSecond,
-                  height: i % 5 === 0 ? '100%' : '50%',
-                }}
+                key={sec}
+                className="absolute top-0 bottom-0 border-l border-white/[0.1] pointer-events-none flex flex-col justify-end"
+                style={{ left: `${sec * pixelsPerSecond}px` }}
               >
-                {i % 5 === 0 && (
-                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 text-[9px] text-muted-foreground whitespace-nowrap mb-1">
-                    {formatTime(i, timeline.fps)}
-                  </span>
-                )}
+                <span className="text-[9px] font-mono text-white/40 pl-1 leading-none pb-1">
+                  {sec}s
+                </span>
               </div>
             ))}
           </div>
 
-          {/* Tracks Container */}
-          <div className="pt-8 px-48" style={{ width: totalWidth + 200 }}>
-            {elementTracks.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-muted-foreground">
-                <p className="text-sm">Select an element and add animation tracks to get started</p>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                {elementTracks.map((track) => (
-                  <AnimationTrackRow
-                    key={track.id}
-                    track={track}
-                    pixelsPerSecond={pixelsPerSecond}
-                    duration={timeline.duration}
-                    currentTime={timeline.currentTime}
-                    onKeyframeClick={(time) => setCurrentTime(time)}
-                  />
-                ))}
-              </div>
-            )}
+          {/* Track Rows corresponding to each element */}
+          <div className="relative" style={{ width: `${totalWidth}px` }}>
+            {elements.map((el) => {
+              const isSelected = editor.selectedElements.includes(el.id);
+              const track = currentProject?.animations?.find((a) => a.elementId === el.id);
 
-            {/* Playhead */}
+              return (
+                <div
+                  key={el.id}
+                  onClick={() => selectElement(el.id)}
+                  className={cn(
+                    'h-8 border-b border-white/[0.04] relative transition-colors cursor-pointer',
+                    isSelected ? 'bg-violet-500/5' : 'hover:bg-white/[0.01]'
+                  )}
+                >
+                  {/* Visual animation duration bar across timeline */}
+                  <div
+                    className="absolute top-1.5 bottom-1.5 rounded bg-violet-600/20 border border-violet-500/30 flex items-center px-2"
+                    style={{
+                      left: 0,
+                      width: `${timeline.duration * pixelsPerSecond}px`,
+                    }}
+                  >
+                    <span className="text-[10px] text-violet-300/60 font-mono truncate">
+                      {el.name}
+                    </span>
+                  </div>
+
+                  {/* Render Keyframes if any */}
+                  {track?.keyframes?.map((kf, kfIdx) => (
+                    <div
+                      key={kfIdx}
+                      className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-violet-400 rotate-45 rounded-xs border border-white shadow-sm z-10 hover:scale-125 transition-transform cursor-pointer"
+                      style={{
+                        left: `${kf.time * pixelsPerSecond - 6}px`,
+                      }}
+                      title={`Keyframe at ${kf.time.toFixed(2)}s`}
+                    />
+                  ))}
+                </div>
+              );
+            })}
+
+            {/* SCRUBBER PLAYHEAD */}
             <div
-              className="absolute top-8 bottom-0 w-px timeline-playhead pointer-events-none z-20"
-              style={{ left: playheadPosition }}
+              className="absolute top-0 bottom-0 w-px bg-violet-500 z-30 pointer-events-none"
+              style={{ left: `${playheadPosition}px` }}
             >
               <div
-                className="absolute top-0 left-1/2 -translate-x-1/2 w-3 h-3 rounded-full border-2 border-background"
-                style={{ backgroundColor: 'var(--primary)' }}
+                onMouseDown={handlePlayheadMouseDown}
+                className="w-3.5 h-3.5 bg-violet-500 rotate-45 rounded-xs border-2 border-[#09090d] shadow-lg absolute -top-1.5 -left-[7px] cursor-col-resize pointer-events-auto hover:scale-125 transition-transform"
               />
-              <div className="absolute bottom-0 left-1/2 -translate-x-1/2 text-[9px] text-muted-foreground whitespace-nowrap mb-1">
-                {formatTime(timeline.currentTime, timeline.fps)}
-              </div>
             </div>
-
-            {/* Playhead Drag Handle */}
-            <div
-              className="absolute top-8 bottom-0 w-4 cursor-col-resize z-30"
-              style={{ left: playheadPosition - 2 }}
-              onMouseDown={handlePlayheadMouseDown}
-            />
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function AnimationTrackRow({
-  track,
-  pixelsPerSecond,
-  duration,
-  currentTime,
-  onKeyframeClick,
-}: {
-  track: AnimationTrack;
-  pixelsPerSecond: number;
-  duration: number;
-  currentTime: number;
-  onKeyframeClick: (time: number) => void;
-}) {
-  return (
-    <div className="relative h-20 bg-accent/30 border border-border rounded-lg overflow-hidden">
-      {/* Track Background */}
-      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/5 to-transparent" />
-
-      {/* Keyframes */}
-      {track.keyframes.map((keyframe, index) => (
-        <button
-          key={index}
-          onClick={() => onKeyframeClick(keyframe.time)}
-          className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2 border-primary bg-primary transform hover:scale-125 transition-transform z-10"
-          style={{
-            left: keyframe.time * pixelsPerSecond - 1.5,
-          }}
-          title={`${keyframe.time.toFixed(2)}s`}
-        >
-          {index === 0 && <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[8px] text-primary">▲</span>}
-        </button>
-      ))}
-
-      {/* Track Label */}
-      <div className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground whitespace-nowrap">
-        {track.property}
-      </div>
-
-      {/* Current Time Indicator on Track */}
-      <div
-        className="absolute top-0 bottom-0 w-px bg-primary/50 pointer-events-none"
-        style={{ left: currentTime * pixelsPerSecond }}
-      />
     </div>
   );
 }

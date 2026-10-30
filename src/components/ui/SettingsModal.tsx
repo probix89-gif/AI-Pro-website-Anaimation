@@ -86,8 +86,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-4xl h-[85vh] bg-secondary border border-border rounded-xl shadow-xl overflow-hidden animate-slide-in-bottom flex flex-col">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fade-in"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-4xl h-[85vh] bg-[#0e0e16] border border-white/[0.08] rounded-2xl shadow-2xl overflow-hidden flex flex-col text-white"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h2 className="text-lg font-semibold">Settings</h2>

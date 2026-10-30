@@ -1,8 +1,7 @@
 'use client';
 
 import { useRef, useEffect } from 'react';
-import { cn } from '@/lib/utils';
-import { RotateCcw } from 'lucide-react';
+import { RotateCw } from 'lucide-react';
 
 interface RotationHandleProps {
   element: any;
@@ -24,60 +23,58 @@ export function RotationHandle({ element, onRotate }: RotationHandleProps) {
       e.preventDefault();
       isRotatingRef.current = true;
 
-      const rect = handle.getBoundingClientRect();
-      centerRef.current = {
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2,
+      const parent = handle.parentElement;
+      if (parent) {
+        const rect = parent.getBoundingClientRect();
+        centerRef.current = {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+        };
+      }
+
+      startAngleRef.current =
+        Math.atan2(e.clientY - centerRef.current.y, e.clientX - centerRef.current.x) * (180 / Math.PI);
+
+      const onMouseMove = (moveEvent: MouseEvent) => {
+        if (!isRotatingRef.current) return;
+        const currentAngle =
+          Math.atan2(moveEvent.clientY - centerRef.current.y, moveEvent.clientX - centerRef.current.x) *
+          (180 / Math.PI);
+        const delta = currentAngle - startAngleRef.current;
+        startAngleRef.current = currentAngle;
+        let newRot = (element.transform.rotation + delta) % 360;
+        if (moveEvent.shiftKey) {
+          newRot = Math.round(newRot / 15) * 15;
+        }
+        onRotate(newRot);
       };
 
-      startAngleRef.current = Math.atan2(e.clientY - centerRef.current.y, e.clientX - centerRef.current.x);
+      const onMouseUp = () => {
+        isRotatingRef.current = false;
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+      };
 
       document.addEventListener('mousemove', onMouseMove);
       document.addEventListener('mouseup', onMouseUp);
     };
 
-    const onMouseMove = (e: MouseEvent) => {
-      if (!isRotatingRef.current) return;
-      const currentAngle = Math.atan2(e.clientY - centerRef.current.y, e.clientX - centerRef.current.x);
-      const deltaAngle = currentAngle - startAngleRef.current;
-      const newRotation = element.transform.rotation + (deltaAngle * 180) / Math.PI;
-      onRotate(newRotation);
-    };
-
-    const onMouseUp = () => {
-      isRotatingRef.current = false;
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-    };
-
     handle.addEventListener('mousedown', onMouseDown);
     return () => {
       handle.removeEventListener('mousedown', onMouseDown);
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
     };
-  }, [element, onRotate]);
-
-  // Position rotation handle above the element
-  const bounds = element.getBoundingClientRect?.() || { width: 100, height: 100 };
+  }, [element.transform?.rotation, onRotate]);
 
   return (
     <div
       ref={handleRef}
-      className={cn(
-        'absolute w-8 h-8 bg-primary border-2 border-primary-foreground rounded-full flex items-center justify-center',
-        'opacity-0 group-hover:opacity-100 transition-opacity',
-        'hover:opacity-100 hover:scale-110',
-        'cursor-crosshair'
-      )}
-      style={{
-        top: -30,
-        left: '50%',
-        transform: 'translateX(-50%)',
-      }}
+      className="absolute -top-7 left-1/2 -translate-x-1/2 w-5 h-5 bg-white border-2 border-violet-600 rounded-full flex items-center justify-center cursor-grab active:cursor-grabbing shadow-md z-30 hover:scale-110 transition-transform"
+      title="Rotate element (Hold Shift for 15° increments)"
       data-rotation-handle
     >
-      <RotateCcw className="w-4 h-4" />
+      <RotateCw className="w-2.5 h-2.5 text-violet-600" />
+      {/* Connector stem */}
+      <div className="absolute top-full left-1/2 -translate-x-1/2 w-px h-2 bg-violet-500 pointer-events-none" />
     </div>
   );
 }
